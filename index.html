@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
+    <title>margin — чтение на английском</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <a class="brand" href="#texts" aria-label="margin — тексты"
+        >margin<span>.</span></a
+      >
+      <nav aria-label="Главная навигация">
+        <a href="#texts">Тексты</a><a href="#words">Словарь</a
+        ><a href="#settings">Настройки</a>
+      </nav>
+    </header>
+    <main id="main" tabindex="-1">
+      <p class="muted">Открываем библиотеку…</p>
+    </main>
+    <button id="selection-action" class="primary selection-action" hidden>
+      Перевести выделенное
+    </button>
+    <dialog id="translation" class="sheet" aria-labelledby="translation-title">
+      <div class="sheet-bar">
+        <span class="eyebrow">ПЕРЕВОД В КОНТЕКСТЕ</span
+        ><button
+          type="button"
+          class="icon-button"
+          id="close-translation"
+          aria-label="Закрыть перевод"
+        >
+          ×
+        </button>
+      </div>
+      <div id="translation-content"></div>
+    </dialog>
+    <dialog id="editor" aria-labelledby="editor-title">
+      <form id="text-form">
+        <div class="sheet-bar">
+          <h2 id="editor-title">Новый текст</h2>
+          <button
+            type="button"
+            class="icon-button"
+            id="close-editor"
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        <label
+          >Название<input
+            id="text-title"
+            maxlength="160"
+            required
+            placeholder="Например, Computer architecture" /></label
+        ><label
+          >Английский текст<textarea
+            id="text-body"
+            rows="12"
+            maxlength="100000"
+            required
+            placeholder="Вставьте текст с естественными абзацами"
+          ></textarea>
+        </label>
+        <div class="form-bottom">
+          <label class="file-button"
+            >Загрузить TXT<input
+              id="txt-file"
+              type="file"
+              accept=".txt,text/plain"
+              hidden /></label
+          ><button class="primary" type="submit">Сохранить текст</button>
+        </div>
+        <p class="muted small" id="editor-note">
+          До 100 000 знаков · TXT в UTF-8
+        </p>
+      </form>
+    </dialog>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>
