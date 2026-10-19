@@ -430,21 +430,34 @@ function preparationControls(doc, ticket) {
     if (!api.session()) { out.textContent = "Для подготовки войдите в настройках."; return; }
     active = true; stop = false; b.textContent = "Остановить подготовку";
     let done = 0;
-    const batches = [];
+    const batches = [], seen = new Set();
     for (const block of doc.body.split(/\n\s*\n/)) {
       for (const part of segmenter.segment(block)) {
         const sentence = part.segment.trim(), terms = [...new Set(words(sentence))];
-        for (let i = 0; i < terms.length; i += 12) batches.push({ sentence, terms: terms.slice(i, i + 12) });
+        for (let i = 0; i < terms.length; i += LIMITS.prepareTerms) {
+          const batch = { sentence, terms: terms.slice(i, i + LIMITS.prepareTerms) };
+          const key = JSON.stringify(batch);
+          if (!seen.has(key)) { seen.add(key); batches.push(batch); }
+        }
       }
     }
     const total = batches.reduce((n, batch) => n + batch.terms.length, 0);
     try {
-      for (const batch of batches) {
-        if (stop || ticket !== renderId) break;
-        out.textContent = `Подготовлено ${done} из ${total} слов. Подготовка обращается к API.`;
-        await api.prepareWords(batch.sentence, batch.terms, doc.id);
-        done += batch.terms.length;
-      }
+      let cursor = 0, failure;
+      const work = async () => {
+        while (!stop && ticket === renderId && cursor < batches.length) {
+          const batch = batches[cursor++];
+          out.textContent = `Подготовлено ${done} из ${total} слов. Подготовка обращается к API.`;
+          try {
+            await api.prepareWords(batch.sentence, batch.terms, doc.id);
+            done += batch.terms.length;
+            out.textContent = `Подготовлено ${done} из ${total} слов. Подготовка обращается к API.`;
+          } catch (e) { failure ||= e; stop = true; }
+        }
+      };
+      // A successful in-flight batch is saved even if its neighbour fails.
+      await Promise.all([work(), work()]);
+      if (failure) throw failure;
       out.textContent = done === total
         ? "Переводы готовы и сохранены. Слова открываются без обращения к API."
         : `Остановлено. Подготовлено ${done} из ${total} слов; можно продолжить позже.`;

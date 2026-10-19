@@ -189,13 +189,13 @@ export async function renderSettings(ui) {
         picker.replaceChildren(
           add(node("label", "Доступные модели"), select),
           para(
-            "Проверенный вариант — DeepSeek V4 Flash. Перед сохранением сервис проверит стоимость. Другие маршруты могут быть недоступны у провайдера.",
+            "Рекомендуем DeepSeek V4 Flash: он прошёл проверку перевода и IPA. Новая модель сохранится только после короткого перевода. Проверка расходует один запрос по её тарифу; при ошибке предыдущая модель останется выбранной.",
             "small muted",
           ),
           button(
-            "Использовать модель",
+            "Проверить и выбрать",
             async (save) => {
-              await busy(save, "Проверяем цену…", modelFeedback, async () => {
+              await busy(save, "Проверяем перевод…", modelFeedback, async () => {
                 await api.request("/model", { id: select.value });
                 paintModel();
                 picker.replaceChildren();

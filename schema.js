@@ -5,6 +5,7 @@ export const LIMITS = Object.freeze({
   phrase: 500,
   practice: 12000,
   backup: 15000000,
+  prepareTerms: 24,
 });
 export class FormatError extends Error {
   constructor(message = "Неверный формат данных") {
@@ -57,7 +58,7 @@ export function validateInput(x) {
   if (x.kind === "prepare") {
     const sentence = str(x.sentence, LIMITS.sentence);
     const sourceWords = sentence.match(/[A-Za-z]+(?:['’\-][A-Za-z]+)*/g) || [];
-    const terms = array(x.terms, 12, 1).map((term) => {
+    const terms = array(x.terms, LIMITS.prepareTerms, 1).map((term) => {
       str(term, 80);
       if (!sourceWords.includes(term)) throw new FormatError("Слово отсутствует в предложении");
       return term;

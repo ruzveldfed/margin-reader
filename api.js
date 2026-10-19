@@ -5,6 +5,27 @@ let base = "",
   expires = 0,
   snapshot = null;
 const inflight = new Map();
+const waiting = [];
+let running = 0;
+// Share the server's two slots. A tapped word takes the next available slot
+// before queued background preparation; nothing is retried automatically.
+function schedule(task, background) {
+  return new Promise((resolve, reject) => {
+    const item = { task, resolve, reject };
+    if (background) waiting.push(item); else waiting.unshift(item);
+    drain();
+  });
+}
+function drain() {
+  while (running < 2 && waiting.length) {
+    const item = waiting.shift();
+    running++;
+    Promise.resolve().then(item.task).then(item.resolve, item.reject).finally(() => {
+      running--;
+      drain();
+    });
+  }
+}
 const MAX_SESSION = 7 * 86400000;
 export function savedStatus() {
   return snapshot;
@@ -77,7 +98,12 @@ export async function logout() {
 export function session() {
   return !!token && expires > Date.now();
 }
-export async function request(path, body) {
+export async function request(path, body, background = false) {
+  return ["/generate", "/model"].includes(path)
+    ? schedule(() => sendRequest(path, body), background)
+    : sendRequest(path, body);
+}
+async function sendRequest(path, body) {
   if (!base)
     throw new Error("Укажите адрес сервиса в дополнительных настройках");
   if (path !== "/login" && !session())
@@ -88,7 +114,7 @@ export async function request(path, body) {
       : path === "/models"
         ? 35000
         : path === "/model"
-          ? 25000
+          ? 55000
           : 10000;
   let res;
   try {
@@ -201,7 +227,7 @@ export async function prepareWords(sentence, terms, docId) {
   if (!pending.length) { await generate(sentenceInput, docId); return; }
   const input = { kind: "prepare", sentence, terms: pending.map(x => x.input.term) };
   const batch = (async () => {
-    const data = await request("/generate", { ...input, requestId: crypto.randomUUID() });
+    const data = await request("/generate", { ...input, requestId: crypto.randomUUID() }, true);
     const result = validateResult(data.result, input);
     // A bad/incomplete response leaves the existing cache intact.
     await db.tx(["docs", "cache"], "readwrite", t => {
