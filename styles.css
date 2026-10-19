@@ -1000,3 +1000,6 @@ input[type="range"] {
     scroll-behavior: auto !important;
   }
 }
+/* Optional, explicitly started preparation; no blocking reader panel. */
+.prepare-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 16px 0 24px; }
+.prepare-tools .small { flex: 1 1 230px; }

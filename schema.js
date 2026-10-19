@@ -54,6 +54,17 @@ export function ipa(x) {
 }
 export function validateInput(x) {
   if (!x || typeof x !== "object") throw new FormatError();
+  if (x.kind === "prepare") {
+    const sentence = str(x.sentence, LIMITS.sentence);
+    const sourceWords = sentence.match(/[A-Za-z]+(?:['’\-][A-Za-z]+)*/g) || [];
+    const terms = array(x.terms, 12, 1).map((term) => {
+      str(term, 80);
+      if (!sourceWords.includes(term)) throw new FormatError("Слово отсутствует в предложении");
+      return term;
+    });
+    if (new Set(terms).size !== terms.length) throw new FormatError("Повтор слова в подготовке");
+    return { kind: "prepare", sentence, terms };
+  }
   if (x.kind === "practice")
     return { kind: x.kind, text: str(x.text, LIMITS.practice, 30) };
   if (x.kind === "check") return { kind: "check" };
@@ -75,6 +86,21 @@ export const CHECK_INPUT = {
 export function validateResult(x, input) {
   if (!x || typeof x !== "object")
     throw new FormatError("Пустой ответ сервиса");
+  if (input.kind === "prepare") {
+    const entries = array(x.entries, input.terms.length, input.terms.length);
+    const indexed = new Map();
+    for (const entry of entries) {
+      const index = integer(entry.index, 0, input.terms.length - 1);
+      if (indexed.has(index)) throw new FormatError("Повтор записи подготовки");
+      indexed.set(index, validateResult(entry, {
+        kind: "word", term: input.terms[index], sentence: input.sentence,
+      }));
+    }
+    return {
+      entries: input.terms.map((term, index) => ({ index, ...indexed.get(index) })),
+      sentenceTranslation: str(x.sentenceTranslation, 2000),
+    };
+  }
   if (input.kind === "check")
     return {
       word: validateResult(x.word, CHECK_INPUT),
@@ -106,13 +132,16 @@ export function validateResult(x, input) {
   const phrases = array(x.phrases, 3).map((p) => {
     const term = str(p.term, 180);
     if (
-      !inSource(term, input.sentence) ||
-      !inSource(input.term, term) ||
-      norm(term) === norm(input.term)
+      !inSource(term, input.sentence)
     )
       throw new FormatError("Сочетание не найдено в предложении");
-    return { term, translation: str(p.translation, 700) };
-  });
+    const translation = str(p.translation, 700);
+    // Optional phrases may repeat the target or quote an unrelated real span.
+    // Omit those; invented source spans still invalidate the response.
+    if (norm(term) === norm(input.term) ||
+      !(term.match(/[A-Za-z]+(?:['’\-][A-Za-z]+)*/g) || []).some(word => norm(word) === norm(input.term))) return null;
+    return { term, translation };
+  }).filter(Boolean);
   return { translation, ipa: ipa(x.ipa), phrases };
 }
 export function validateQuestion(q, source) {

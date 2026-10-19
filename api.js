@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { validateResult } from "./schema.js";
+import { validateResult, LIMITS } from "./schema.js";
 let base = "",
   token = "",
   expires = 0,
@@ -183,4 +183,50 @@ export async function generate(input, docId) {
   } finally {
     inflight.delete(id);
   }
+}
+
+// Explicit preparation writes ordinary word-cache records, so reading stays offline.
+export async function prepareWords(sentence, terms, docId) {
+  const sentenceInput = { kind: "sentence", term: sentence.slice(0, LIMITS.phrase), sentence };
+  const sentenceId = await cacheKey(sentenceInput, docId);
+  const pending = [];
+  for (const term of terms) {
+    const input = { kind: "word", term, sentence };
+    const id = await cacheKey(input, docId);
+    const existing = await db.get("cache", id);
+    if (existing) { validateResult(existing.result, input); continue; }
+    if (inflight.has(id)) { await inflight.get(id); continue; }
+    pending.push({ id, input });
+  }
+  if (!pending.length) { await generate(sentenceInput, docId); return; }
+  const input = { kind: "prepare", sentence, terms: pending.map(x => x.input.term) };
+  const batch = (async () => {
+    const data = await request("/generate", { ...input, requestId: crypto.randomUUID() });
+    const result = validateResult(data.result, input);
+    // A bad/incomplete response leaves the existing cache intact.
+    await db.tx(["docs", "cache"], "readwrite", t => {
+      const doc = t.objectStore("docs").get(docId);
+      doc.onsuccess = () => {
+        if (!doc.result) return;
+        pending.forEach((item, index) => t.objectStore("cache").put({
+          id: item.id, docId, input: item.input,
+          result: validateResult(result.entries[index], item.input), created: Date.now(),
+        }));
+        t.objectStore("cache").put({
+          id: sentenceId, docId, input: sentenceInput,
+          result: { translation: result.sentenceTranslation }, created: Date.now(),
+        });
+      };
+    });
+    return result;
+  })();
+  pending.forEach((item, index) => {
+    const value = batch.then(result => ({
+      result: validateResult(result.entries[index], item.input), cached: true, id: item.id,
+    }));
+    value.catch(() => {});
+    inflight.set(item.id, value);
+  });
+  try { await batch; }
+  finally { pending.forEach(item => inflight.delete(item.id)); }
 }

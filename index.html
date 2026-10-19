@@ -82,8 +82,10 @@
               type="file"
               accept=".txt,text/plain"
               hidden /></label
-          ><button class="primary" type="submit">Сохранить текст</button>
+          ><button class="primary" id="save-text" type="submit">Сохранить текст</button>
         </div>
+        <label class="check-label"><input type="checkbox" id="prepare-on-save" />Подготовить переводы сразу</label>
+        <p class="muted small" id="prepare-on-save-note">Слова, IPA, сочетания и предложения сохранятся заранее. Практика генерируется отдельно.</p>
         <p class="muted small" id="editor-note">
           До 100 000 знаков · TXT в UTF-8
         </p>

@@ -1,4 +1,4 @@
-const CACHE = "margin-shell-v2";
+const CACHE = "margin-shell-v4";
 const FILES = [
   "./",
   "./index.html",

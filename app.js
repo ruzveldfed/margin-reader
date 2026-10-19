@@ -39,7 +39,8 @@ let settings = { fontSize: 21, backend: "" },
   toastTimer,
   scrollTimer,
   tapTimer,
-  wordList = [];
+  wordList = [],
+  pendingPreparation = null;
 function toast(text) {
   clearTimeout(toastTimer);
   $("#toast").textContent = text;
@@ -108,8 +109,19 @@ modal.addEventListener("click", (e) => {
   }
 });
 $("#close-editor").onclick = () => $("#editor").close();
+function paintSaveAction() {
+  $("#save-text").textContent = $("#prepare-on-save").checked
+    ? "Сохранить и подготовить" : "Сохранить текст";
+}
+$("#prepare-on-save").onchange = paintSaveAction;
 function showEditor() {
   $("#text-form").reset();
+  $("#prepare-on-save").checked = api.session();
+  $("#prepare-on-save").disabled = !api.session();
+  $("#prepare-on-save-note").textContent = api.session()
+    ? "Один раз через API: слова, IPA, сочетания и предложения. Практика — отдельно."
+    : "Для подготовки переводов сначала войдите в настройках. Текст можно сохранить сейчас.";
+  paintSaveAction();
   $("#editor-note").textContent = "До 100 000 знаков · TXT в UTF-8";
   $("#editor").showModal();
   $("#text-title").focus();
@@ -133,6 +145,8 @@ $("#txt-file").addEventListener("change", () =>
 );
 $("#text-form").addEventListener("submit", (e) => {
   e.preventDefault();
+  if ($("#save-text").disabled) return;
+  $("#save-text").disabled = true;
   run(async () => {
     const title = $("#text-title").value.trim(),
       body = $("#text-body").value.trim();
@@ -149,9 +163,10 @@ $("#text-form").addEventListener("submit", (e) => {
         anchor: 0,
       };
     await db.put("docs", d);
+    if ($("#prepare-on-save").checked) pendingPreparation = d.id;
     $("#editor").close();
     location.hash = "#read/" + d.id;
-  });
+  }).finally(() => { $("#save-text").disabled = false; });
 });
 async function library() {
   activeNav("texts");
@@ -334,6 +349,7 @@ async function read(id, ticket) {
   current = d;
   wordList = await db.all("words");
   const root = node("article", null, "reader");
+  const preparation = preparationControls(d, ticket);
   const tools = add(
     node("div", null, "font-tools"),
     button("A−", async () => {
@@ -364,6 +380,7 @@ async function read(id, ticket) {
       node("span", "EN → RU"),
       node("span", "Место чтения сохраняется"),
     ),
+    preparation.element,
     readingBody(d),
     add(
       node("div", null, "reading-end"),
@@ -383,6 +400,10 @@ async function read(id, ticket) {
   );
   if (ticket !== renderId) return;
   main.replaceChildren(root);
+  if (pendingPreparation === d.id) {
+    pendingPreparation = null;
+    run(preparation.start);
+  }
   requestAnimationFrame(() => {
     if (d.anchor > 0) {
       const sentences = [...document.querySelectorAll(".sentence")];
@@ -399,6 +420,40 @@ async function read(id, ticket) {
         );
     } else window.scrollTo(0, 0);
   });
+}
+function preparationControls(doc, ticket) {
+  const out = node("span", "Подготовьте слова заранее, чтобы открывать переводы без ожидания.", "small muted");
+  out.setAttribute("role", "status");
+  let active = false, stop = false;
+  const start = async () => {
+    if (active) { stop = true; b.disabled = true; out.textContent = "Завершаем текущий запрос…"; return; }
+    if (!api.session()) { out.textContent = "Для подготовки войдите в настройках."; return; }
+    active = true; stop = false; b.textContent = "Остановить подготовку";
+    let done = 0;
+    const batches = [];
+    for (const block of doc.body.split(/\n\s*\n/)) {
+      for (const part of segmenter.segment(block)) {
+        const sentence = part.segment.trim(), terms = [...new Set(words(sentence))];
+        for (let i = 0; i < terms.length; i += 12) batches.push({ sentence, terms: terms.slice(i, i + 12) });
+      }
+    }
+    const total = batches.reduce((n, batch) => n + batch.terms.length, 0);
+    try {
+      for (const batch of batches) {
+        if (stop || ticket !== renderId) break;
+        out.textContent = `Подготовлено ${done} из ${total} слов. Подготовка обращается к API.`;
+        await api.prepareWords(batch.sentence, batch.terms, doc.id);
+        done += batch.terms.length;
+      }
+      out.textContent = done === total
+        ? "Переводы готовы и сохранены. Слова открываются без обращения к API."
+        : `Остановлено. Подготовлено ${done} из ${total} слов; можно продолжить позже.`;
+    } catch (e) {
+      out.textContent = `Подготовлено ${done} из ${total} слов. ${e.message} Сохранённые переводы доступны; повтор автоматически не выполняется.`;
+    } finally { active = false; b.disabled = false; b.textContent = "Подготовить переводы"; }
+  };
+  const b = button("Подготовить переводы", start, "quiet");
+  return { element: add(node("div", null, "prepare-tools"), b, out), start };
 }
 function applyFont() {
   document.documentElement.style.setProperty(
