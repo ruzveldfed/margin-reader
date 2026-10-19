@@ -735,6 +735,102 @@ input[type="range"] {
   font-weight: 600;
   font-size: 13px;
 }
+.connection-state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 14px 0 8px;
+  font-size: 14px;
+}
+.connection-state.inactive .status-dot {
+  background: #9ca0a8;
+}
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.check-label input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+  flex: none;
+}
+.settings-feedback:empty {
+  display: none;
+}
+.settings-feedback {
+  margin-top: 15px;
+  overflow-wrap: anywhere;
+}
+.settings-feedback p {
+  margin-bottom: 8px;
+}
+.model-name {
+  font-size: 17px;
+  font-weight: 650;
+  margin-bottom: 7px;
+  overflow-wrap: anywhere;
+}
+.settings-details {
+  padding: 25px 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-details > summary,
+.diagnostic-details > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 650;
+  list-style: none;
+}
+.settings-details > summary:before,
+.diagnostic-details > summary:before {
+  content: "+";
+  color: var(--muted);
+  font-size: 18px;
+}
+.settings-details[open] > summary:before,
+.diagnostic-details[open] > summary:before {
+  content: "−";
+}
+.settings-details > p {
+  margin-top: 12px;
+}
+.settings-details form > button {
+  margin-top: 12px;
+}
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.diagnostic-details {
+  margin: 20px 0;
+}
+.usage-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+  margin: 22px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.usage-summary strong {
+  font-size: 20px;
+  color: var(--ink);
+  font-weight: 650;
+}
+.settings-section > form + .settings-actions {
+  margin-top: 14px;
+}
 .search-label {
   margin: 0 0 24px;
 }

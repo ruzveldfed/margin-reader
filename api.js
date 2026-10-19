@@ -2,8 +2,54 @@ import * as db from "./db.js";
 import { validateResult } from "./schema.js";
 let base = "",
   token = "",
-  expires = 0;
+  expires = 0,
+  snapshot = null;
 const inflight = new Map();
+const MAX_SESSION = 7 * 86400000;
+export function savedStatus() {
+  return snapshot;
+}
+export function sessionExpires() {
+  return expires;
+}
+async function saveSnapshot(data) {
+  const next = { ...(snapshot || {}) };
+  for (const key of [
+    "model",
+    "day",
+    "daily",
+    "requests",
+    "estimated",
+    "reserved",
+    "budget",
+    "inputTokens",
+    "outputTokens",
+  ]) {
+    if (data[key] !== undefined) next[key] = data[key];
+  }
+  next.updated = Date.now();
+  if (data.day !== undefined && data.requests !== undefined)
+    next.usageUpdated = Date.now();
+  snapshot = next;
+  await db.put("meta", { id: "serviceStatus", base, data: next });
+}
+export async function restoreSession() {
+  const [auth, status] = await Promise.all([
+    db.get("meta", "authSession"),
+    db.get("meta", "serviceStatus"),
+  ]);
+  if (status?.base === base) snapshot = status.data;
+  if (
+    auth?.base === base &&
+    typeof auth.token === "string" &&
+    auth.token.length < 1000 &&
+    auth.expires > Date.now() &&
+    auth.expires <= Date.now() + MAX_SESSION
+  ) {
+    token = auth.token;
+    expires = auth.expires;
+  } else if (auth) await db.remove("meta", "authSession");
+}
 export function setBase(url) {
   const u = new URL(url);
   if (u.username || u.password || u.search || u.hash || u.pathname !== "/")
@@ -13,24 +59,37 @@ export function setBase(url) {
     !(u.protocol === "http:" && ["localhost", "127.0.0.1"].includes(u.hostname))
   )
     throw new Error("Backend должен использовать HTTPS");
-  if (base !== u.origin) {
+  if (base && base !== u.origin) {
     token = "";
     expires = 0;
+    snapshot = null;
+    db.remove("meta", "authSession").catch(() => {});
+    db.remove("meta", "serviceStatus").catch(() => {});
   }
   base = u.origin;
   return base;
 }
-export function logout() {
+export async function logout() {
   token = "";
   expires = 0;
+  await db.remove("meta", "authSession");
 }
 export function session() {
   return !!token && expires > Date.now();
 }
 export async function request(path, body) {
-  if (!base) throw new Error("Укажите адрес backend в настройках");
+  if (!base)
+    throw new Error("Укажите адрес сервиса в дополнительных настройках");
   if (path !== "/login" && !session())
-    throw new Error("Войдите в настройках. Сессия действует один час");
+    throw new Error("Войдите в настройках, чтобы получать новые переводы");
+  const timeout =
+    path === "/generate"
+      ? 55000
+      : path === "/models"
+        ? 35000
+        : path === "/model"
+          ? 25000
+          : 10000;
   let res;
   try {
     res = await fetch(base + path, {
@@ -43,11 +102,15 @@ export async function request(path, body) {
       credentials: "omit",
       cache: "no-store",
       referrerPolicy: "no-referrer",
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(timeout),
     });
-  } catch {
+  } catch (e) {
     throw new Error(
-      "Backend не отвечает. Проверьте адрес, соединение и CORS в настройках Worker",
+      e.name === "TimeoutError" || e.name === "AbortError"
+        ? "Сервис не ответил за " +
+            Math.round(timeout / 1000) +
+            " секунд. Адрес сохранён. Можно продолжать читать и повторить позже."
+        : "Не удалось связаться с сервисом переводов. Адрес сохранён. Проверьте доступность сервиса в дополнительных настройках.",
     );
   }
   let data;
@@ -59,15 +122,28 @@ export async function request(path, body) {
     );
   }
   if (!res.ok) {
-    if (res.status === 401) logout();
+    if (res.status === 401) await logout();
     throw new Error(data.error || `Ошибка подключения (${res.status})`);
   }
+  if (["/status", "/model", "/limits", "/login"].includes(path))
+    await saveSnapshot(data);
   return data;
 }
-export async function login(password) {
-  const d = await request("/login", { password });
+export async function login(password, remember = true) {
+  const d = await request("/login", { password, remember });
+  if (
+    typeof d.token !== "string" ||
+    d.token.length > 1000 ||
+    !Number.isFinite(d.expires) ||
+    d.expires <= Date.now() ||
+    d.expires > Date.now() + MAX_SESSION
+  )
+    throw new Error("Сервис вернул некорректную сессию");
   token = d.token;
   expires = d.expires;
+  if (remember)
+    await db.put("meta", { id: "authSession", base, token, expires });
+  else await db.remove("meta", "authSession");
   return d;
 }
 export async function cacheKey(input, docId) {

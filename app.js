@@ -2,6 +2,8 @@ import * as db from "./db.js";
 import * as api from "./api.js";
 import { DEMO } from "./demo.js";
 import { LIMITS, norm, validateBackup } from "./schema.js";
+import { DEFAULT_BACKEND } from "./config.js";
+import { renderSettings } from "./settings.js";
 const $ = (s) => document.querySelector(s),
   main = $("#main"),
   modal = $("#translation"),
@@ -906,314 +908,19 @@ async function practice(id, ticket) {
 }
 async function settingsPage() {
   activeNav("settings");
-  const root = node("div", null, "settings");
-  add(root, pageTop("Настройки"));
-  const conn = node("section", null, "settings-section");
-  add(
-    conn,
-    node("h2", "Подключение"),
-    para(
-      "Ключ ODIRouter хранится в серверном секрете. Здесь нужен только адрес вашего Worker.",
-    ),
-  );
-  const url = node("input");
-  url.type = "url";
-  url.placeholder = "https://your-worker.workers.dev";
-  url.value = settings.backend;
-  const urlLabel = add(node("label", "Адрес backend"), url);
-  add(
-    conn,
-    urlLabel,
-    button("Сохранить адрес", async () => {
-      settings.backend = api.setBase(url.value.trim());
-      await saveSettings();
-      url.value = settings.backend;
-      toast("Адрес сохранён");
-    }),
-  );
-  const password = node("input");
-  password.type = "password";
-  password.autocomplete = "current-password";
-  password.placeholder = "Пароль доступа к вашему backend";
-  const loginForm = add(
-    node("form", null, "inline-form"),
-    add(node("label", "Пароль доступа"), password),
-  );
-  const enter = node(
-    "button",
-    api.session() ? "Войти снова" : "Войти",
-    "primary",
-  );
-  enter.type = "submit";
-  loginForm.append(enter);
-  loginForm.onsubmit = (e) => {
-    e.preventDefault();
-    run(async () => {
-      enter.disabled = true;
-      try {
-        await api.login(password.value);
-        password.value = "";
-        await settingsPage();
-        toast("Вход выполнен на один час");
-      } finally {
-        password.value = "";
-        enter.disabled = false;
-      }
-    });
-  };
-  add(
-    conn,
-    loginForm,
-    para(
-      api.session()
-        ? "Сессия активна. Токен хранится в памяти этой вкладки."
-        : "Пароль и токен не сохраняются. После обновления страницы войдите снова.",
-      "small muted",
-    ),
-  );
-  if (api.session())
-    add(
-      conn,
-      button("Выйти", async () => {
-        api.logout();
-        await settingsPage();
-      }),
-    );
-  root.append(conn);
-  const model = node("section", null, "settings-section");
-  add(
-    model,
-    node("h2", "Модель и проверка"),
-    para(
-      "Начните с недорогой Flash-Lite. Выбирайте точный ID из каталога вашего ключа. Сервер отклоняет тарифы выше $0.50 за ввод и $2 за вывод на 1 млн токенов.",
-    ),
-  );
-  const modelOut = node("div");
-  const select = node("select");
-  select.setAttribute("aria-label", "Модель из каталога ODIRouter");
-  add(
-    model,
-    button("Загрузить каталог", async (b) => {
-      b.disabled = true;
-      try {
-        const d = await api.request("/models");
-        select.replaceChildren();
-        for (const m of d.models) {
-          const o = node("option", m.name + " · " + m.id);
-          o.value = m.id;
-          select.append(o);
-        }
-        modelOut.replaceChildren(
-          select,
-          button(
-            "Выбрать и проверить цену",
-            async () => {
-              const info = await api.request("/model", { id: select.value });
-              toast("Модель сохранена: " + info.model.id);
-              await settingsPage();
-            },
-            "primary",
-          ),
-        );
-        if (!d.models.length)
-          modelOut.replaceChildren(
-            para("В каталоге нет текстовых моделей.", "notice"),
-          );
-      } finally {
-        b.disabled = false;
-      }
-    }),
-    modelOut,
-    button("Короткий тест API", async (b) => {
-      b.disabled = true;
-      try {
-        const d = await api.request("/generate", {
-          kind: "check",
-          requestId: crypto.randomUUID(),
-        });
-        modelOut.replaceChildren(
-          para(
-            "JSON и структура приняты. Время: " +
-              d.elapsedMs +
-              " мс. Проверьте смысл и IPA:",
-            "notice",
-          ),
-          para(
-            "stores " +
-              (d.result.word.ipa || "(IPA отсутствует)") +
-              " — " +
-              d.result.word.translation,
-          ),
-          para(d.result.sentenceTranslation),
-        );
-        for (const p of d.result.word.phrases)
-          add(modelOut, para(p.term + " — " + p.translation, "small"));
-        add(
-          modelOut,
-          para(d.result.question.question, "small"),
-          para(d.result.question.options.join(" / "), "small"),
-          para(
-            "Ответ: " +
-              d.result.question.options[d.result.question.answer] +
-              " · " +
-              d.result.question.explanation,
-            "small",
-          ),
-        );
-      } finally {
-        b.disabled = false;
-      }
-    }),
-    para(
-      "Тест: одно предложение, слово stores, IPA, сочетание и вопрос. До 600 выходных токенов; максимум 3 проверки в день.",
-      "small muted",
-    ),
-  );
-  root.append(model);
-  const usage = node("section", null, "settings-section"),
-    usageOut = node("div");
-  add(
-    usage,
-    node("h2", "Лимит и расход"),
-    para(
-      "Сервер считает все начатые запросы к модели, включая ошибки. День — по UTC. Кэш и повторная практика не расходуют лимит.",
-    ),
-  );
-  const daily = node("input");
-  daily.type = "number";
-  daily.min = "1";
-  daily.max = "200";
-  daily.value = "40";
-  add(
-    usage,
-    add(
-      node("div", null, "inline-form"),
-      add(node("label", "Запросов в день (до серверного максимума)"), daily),
-      button("Сохранить лимит", async () => {
-        await api.request("/limits", { daily: Number(daily.value) });
-        toast("Лимит сохранён");
-        await refreshUsage();
-      }),
-    ),
-    button("Обновить расход", refreshUsage),
-    usageOut,
-  );
-  async function refreshUsage() {
-    const d = await api.request("/status");
-    daily.value = d.daily;
-    const m = d.model;
-    usageOut.replaceChildren(
-      para(
-        `${d.day} UTC\nЗапросы: ${d.requests} / ${d.daily}\nОценка по токенам: $${d.estimated.toFixed(6)}\nВерхняя резервная оценка: $${d.reserved.toFixed(5)} / $${d.budget.toFixed(2)}\nПодтверждено провайдером: ${d.inputTokens} входных, ${d.outputTokens} выходных токенов\nСписание в деньгах: смотрите кабинет ODIRouter${m ? "\nМодель: " + m.id + "\nТариф за 1 млн: $" + m.input + " / $" + m.output : ""}`,
-        "usage",
-      ),
-      para(
-        "Резерв включает запросы, для которых провайдер не вернул usage. Это ограничитель расходов, а не подтверждённый счёт.",
-        "small muted",
-      ),
-    );
-  }
-  root.append(usage);
-  const typography = node("section", null, "settings-section"),
-    range = node("input");
-  range.type = "range";
-  range.min = "17";
-  range.max = "29";
-  range.value = settings.fontSize;
-  const rangeLabel = add(
-    node("label", "Размер текста: " + settings.fontSize + " px"),
-    range,
-  );
-  range.oninput = () =>
-    run(async () => {
-      settings.fontSize = Number(range.value);
-      rangeLabel.firstChild.textContent =
-        "Размер текста: " + settings.fontSize + " px";
-      applyFont();
-      await saveSettings();
-    });
-  add(
-    typography,
-    node("h2", "Чтение"),
-    rangeLabel,
-    para(
-      "Нажмите на слово для перевода. Для фразы удерживайте слово, расширьте системное выделение и нажмите «Перевести выделенное». До 500 знаков.",
-      "small muted",
-    ),
-  );
-  root.append(typography);
-  const backup = node("section", null, "settings-section"),
-    upload = node("input");
-  upload.type = "file";
-  upload.accept = ".json,application/json";
-  upload.hidden = true;
-  upload.onchange = () =>
-    run(async () => {
-      try {
-        const f = upload.files[0];
-        if (!f) return;
-        if (f.size > LIMITS.backup)
-          throw new Error("Резервная копия больше 15 МБ");
-        const b = validateBackup(JSON.parse(await f.text()));
-        if (
-          !confirm(
-            `Восстановить ${b.docs.length} текстов и ${b.words.length} записей? Текущая библиотека, переводы и результаты будут заменены. Сначала экспортируйте их, если они нужны.`,
-          )
-        )
-          return;
-        await db.restoreData(b);
-        toast("Библиотека восстановлена");
-      } finally {
-        upload.value = "";
-      }
-    });
-  const uploadLabel = add(node("label", "Импорт JSON", "file-button"), upload);
-  add(
-    backup,
-    node("h2", "Резервная копия"),
-    para(
-      "Данные привязаны к браузеру и устройству. Для переноса на телефон или компьютер экспортируйте JSON и импортируйте его там. Ключи, пароль и настройки подключения в копию не входят.",
-    ),
-    add(
-      node("div", null, "backup-controls"),
-      button("Экспорт JSON", async () => {
-        const data = await db.exportData(),
-          url = URL.createObjectURL(
-            new Blob([JSON.stringify(data, null, 2)], {
-              type: "application/json",
-            }),
-          ),
-          a = link("", "");
-        a.href = url;
-        a.download =
-          "margin-backup-" + new Date().toISOString().slice(0, 10) + ".json";
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        toast("Резервная копия подготовлена");
-      }),
-      uploadLabel,
-    ),
-    para(
-      "Очистка данных браузера удалит библиотеку. Делайте копии регулярно. Облачной синхронизации нет.",
-      "small muted",
-    ),
-    button("Защитить локальное хранение от очистки", async () => {
-      const granted = await navigator.storage?.persist?.();
-      toast(
-        granted
-          ? "Браузер разрешил постоянное хранение"
-          : "Браузер не предоставил постоянное хранение. Сохраняйте JSON-копии.",
-      );
-    }),
-  );
-  root.append(backup);
-  main.replaceChildren(root);
-  if (api.session())
-    try {
-      await refreshUsage();
-    } catch (e) {
-      errorView(usageOut, e);
-    }
+  await renderSettings({
+    main,
+    settings,
+    saveSettings,
+    applyFont,
+    toast,
+    node,
+    add,
+    button,
+    para,
+    link,
+    onRender: settingsPage,
+  });
 }
 async function route() {
   await saveProgress();
@@ -1248,6 +955,8 @@ try {
         settings.backend = api.setBase(stored.backend);
       } catch {}
   }
+  if (!settings.backend) settings.backend = api.setBase(DEFAULT_BACKEND);
+  await api.restoreSession();
   applyFont();
   if (!(await db.get("meta", "initialized"))) {
     await db.tx(["docs", "meta"], "readwrite", (t) => {
