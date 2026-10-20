@@ -82,13 +82,21 @@
               type="file"
               accept=".txt,text/plain"
               hidden /></label
-          ><button class="primary" id="save-text" type="submit">Сохранить текст</button>
+          ><button class="primary" id="save-text" type="submit">Добавить текст</button>
         </div>
-        <label class="check-label"><input type="checkbox" id="prepare-on-save" />Подготовить переводы сразу</label>
-        <p class="muted small" id="prepare-on-save-note">Слова, IPA, сочетания и предложения сохранятся заранее. Практика генерируется отдельно.</p>
         <p class="muted small" id="editor-note">
           До 100 000 знаков · TXT в UTF-8
         </p>
+      </form>
+    </dialog>
+    <dialog id="sign-in" aria-labelledby="sign-in-title">
+      <form id="sign-in-form">
+        <div class="sheet-bar"><h2 id="sign-in-title">Вход</h2>
+          <button id="close-sign-in" type="button" class="icon-button" aria-label="Закрыть вход">×</button></div>
+        <p class="muted">Войдите, чтобы готовить новые переводы.</p>
+        <label>Пароль<input id="sign-in-password" type="password" autocomplete="current-password" name="password" maxlength="256" required /></label>
+        <p id="sign-in-error" role="status" class="error"></p>
+        <button type="submit" class="primary">Войти</button>
       </form>
     </dialog>
     <div id="toast" role="status" aria-live="polite" hidden></div>

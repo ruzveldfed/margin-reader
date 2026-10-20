@@ -1,9 +1,12 @@
 import * as db from "./db.js";
 import * as api from "./api.js";
 import { DEMO } from "./demo.js";
-import { LIMITS, norm, validateBackup } from "./schema.js";
+import { LIMITS, norm } from "./schema.js";
 import { DEFAULT_BACKEND } from "./config.js";
 import { renderSettings } from "./settings.js";
+import { ensureSession } from "./auth.js";
+import { preparationJob, openPreparation } from "./preparation.js";
+api.setAuthorizeHandler(ensureSession);
 const $ = (s) => document.querySelector(s),
   main = $("#main"),
   modal = $("#translation"),
@@ -30,7 +33,7 @@ const link = (text, href, cls = "") => {
   return a;
 };
 const para = (text, cls = "") => node("p", text, cls);
-let settings = { fontSize: 21, backend: "" },
+let settings = { fontSize: 21, backend: "", theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light" },
   current = null,
   view = "",
   renderId = 0,
@@ -40,7 +43,8 @@ let settings = { fontSize: 21, backend: "" },
   scrollTimer,
   tapTimer,
   wordList = [],
-  pendingPreparation = null;
+  pendingPreparation = null,
+  unsubscribePreparation = null;
 function toast(text) {
   clearTimeout(toastTimer);
   $("#toast").textContent = text;
@@ -109,19 +113,8 @@ modal.addEventListener("click", (e) => {
   }
 });
 $("#close-editor").onclick = () => $("#editor").close();
-function paintSaveAction() {
-  $("#save-text").textContent = $("#prepare-on-save").checked
-    ? "Сохранить и подготовить" : "Сохранить текст";
-}
-$("#prepare-on-save").onchange = paintSaveAction;
 function showEditor() {
   $("#text-form").reset();
-  $("#prepare-on-save").checked = api.session();
-  $("#prepare-on-save").disabled = !api.session();
-  $("#prepare-on-save-note").textContent = api.session()
-    ? "Один раз через API: слова, IPA, сочетания и предложения. Практика — отдельно."
-    : "Для подготовки переводов сначала войдите в настройках. Текст можно сохранить сейчас.";
-  paintSaveAction();
   $("#editor-note").textContent = "До 100 000 знаков · TXT в UTF-8";
   $("#editor").showModal();
   $("#text-title").focus();
@@ -163,7 +156,7 @@ $("#text-form").addEventListener("submit", (e) => {
         anchor: 0,
       };
     await db.put("docs", d);
-    if ($("#prepare-on-save").checked) pendingPreparation = d.id;
+    pendingPreparation = d.id;
     $("#editor").close();
     location.hash = "#read/" + d.id;
   }).finally(() => { $("#save-text").disabled = false; });
@@ -268,7 +261,6 @@ async function library() {
     main,
     add(
       node("div", null, "library-footer"),
-      link("Резервная копия", "#settings", "small"),
       node("span", "Сохранено в браузере", "small muted"),
     ),
   );
@@ -400,10 +392,9 @@ async function read(id, ticket) {
   );
   if (ticket !== renderId) return;
   main.replaceChildren(root);
-  if (pendingPreparation === d.id) {
-    pendingPreparation = null;
-    run(preparation.start);
-  }
+  const forcePreparation = pendingPreparation === d.id;
+  if (forcePreparation) pendingPreparation = null;
+  run(() => openPreparation(d, forcePreparation));
   requestAnimationFrame(() => {
     if (d.anchor > 0) {
       const sentences = [...document.querySelectorAll(".sentence")];
@@ -422,51 +413,37 @@ async function read(id, ticket) {
   });
 }
 function preparationControls(doc, ticket) {
-  const out = node("span", "Подготовьте слова заранее, чтобы открывать переводы без ожидания.", "small muted");
-  out.setAttribute("role", "status");
-  let active = false, stop = false;
-  const start = async () => {
-    if (active) { stop = true; b.disabled = true; out.textContent = "Завершаем текущий запрос…"; return; }
-    if (!api.session()) { out.textContent = "Для подготовки войдите в настройках."; return; }
-    active = true; stop = false; b.textContent = "Остановить подготовку";
-    let done = 0;
-    const batches = [], seen = new Set();
-    for (const block of doc.body.split(/\n\s*\n/)) {
-      for (const part of segmenter.segment(block)) {
-        const sentence = part.segment.trim(), terms = [...new Set(words(sentence))];
-        for (let i = 0; i < terms.length; i += LIMITS.prepareTerms) {
-          const batch = { sentence, terms: terms.slice(i, i + LIMITS.prepareTerms) };
-          const key = JSON.stringify(batch);
-          if (!seen.has(key)) { seen.add(key); batches.push(batch); }
-        }
-      }
-    }
-    const total = batches.reduce((n, batch) => n + batch.terms.length, 0);
-    try {
-      let cursor = 0, failure;
-      const work = async () => {
-        while (!stop && ticket === renderId && cursor < batches.length) {
-          const batch = batches[cursor++];
-          out.textContent = `Подготовлено ${done} из ${total} слов. Подготовка обращается к API.`;
-          try {
-            await api.prepareWords(batch.sentence, batch.terms, doc.id);
-            done += batch.terms.length;
-            out.textContent = `Подготовлено ${done} из ${total} слов. Подготовка обращается к API.`;
-          } catch (e) { failure ||= e; stop = true; }
-        }
-      };
-      // A successful in-flight batch is saved even if its neighbour fails.
-      await Promise.all([work(), work()]);
-      if (failure) throw failure;
-      out.textContent = done === total
-        ? "Переводы готовы и сохранены. Слова открываются без обращения к API."
-        : `Остановлено. Подготовлено ${done} из ${total} слов; можно продолжить позже.`;
-    } catch (e) {
-      out.textContent = `Подготовлено ${done} из ${total} слов. ${e.message} Сохранённые переводы доступны; повтор автоматически не выполняется.`;
-    } finally { active = false; b.disabled = false; b.textContent = "Подготовить переводы"; }
-  };
-  const b = button("Подготовить переводы", start, "quiet");
-  return { element: add(node("div", null, "prepare-tools"), b, out), start };
+  const job = preparationJob(doc);
+  const root = node("section", null, "preparation-status");
+  root.setAttribute("aria-label", "Перевод текста");
+  const bar = node("progress");
+  bar.setAttribute("aria-label", "Переведено слов");
+  const numbers = node("span", "", "preparation-numbers");
+  const status = node("p", "", "small muted");
+  status.setAttribute("role", "status");
+  const action = button("Приостановить", async () => {
+    if (job.status === "running") { job.pause(); action.disabled = true; status.textContent = "Завершаем текущую часть…"; }
+    else await job.start();
+  }, "quiet");
+  unsubscribePreparation = job.subscribe(state => {
+    if (ticket !== renderId) return;
+    bar.max = Math.max(1, state.total);
+    bar.value = state.done;
+    numbers.textContent = `Переведено ${state.done} · осталось ${Math.max(0, state.total - state.done)}`;
+    status.textContent = state.status === "done" ? "Всё готово. Можно читать без ожидания."
+      : state.status === "loading" ? "Подготавливаем текст…"
+      : state.status === "running" ? (state.done === state.total ? "Завершаем перевод предложений…" : "Переводим. Уже готовые слова можно открывать.")
+      : state.error || "Перевод приостановлен.";
+    action.hidden = ["done", "loading"].includes(state.status);
+    action.disabled = state.status === "running" && state.stop;
+    action.textContent = state.status === "running" ? "Приостановить" : "Продолжить";
+  });
+  add(root, add(node("div", null, "preparation-heading"), numbers, action), bar, status);
+  return { element: root };
+}
+function applyTheme() {
+  document.documentElement.dataset.theme = settings.theme;
+  document.querySelector('meta[name="theme-color"]').content = settings.theme === "dark" ? "#15171c" : "#ffffff";
 }
 function applyFont() {
   document.documentElement.style.setProperty(
@@ -592,7 +569,7 @@ async function translate(input, doc) {
     const r = data.result;
     content.replaceChildren(translationHeading(input.term));
     if (input.kind === "word")
-      add(content, para(r.ipa || "IPA не предоставлена сервисом", "ipa"));
+      add(content, para(r.ipa || "Транскрипция недоступна", "ipa"));
     add(
       content,
       translationRow(
@@ -640,23 +617,12 @@ async function translate(input, doc) {
         out,
       );
     }
-    add(
-      content,
-      para(
-        data.cached
-          ? "Сохранённый перевод · без запроса к API"
-          : "ODIRouter · британский IPA запрошен у модели",
-        "translation-foot",
-      ),
-    );
   } catch (e) {
     if (ticket !== translationId) return;
     content.replaceChildren(
       translationHeading(input.term),
       para(e.message, "error"),
-      link("Открыть настройки", "#settings", "small"),
     );
-    content.querySelector("a").onclick = closeTranslation;
   }
 }
 function translationRow(term, translation, ipa, context, doc) {
@@ -816,7 +782,7 @@ async function practice(id, ticket) {
         "primary",
       ),
       para(
-        "Один запрос. Готовые задания сохранятся для повторения.",
+        "Готовые задания сохранятся для повторения.",
         "small muted",
       ),
     );
@@ -967,7 +933,7 @@ async function practice(id, ticket) {
         await practice(id, ticket);
       }),
       para(
-        "Повторение не обращается к API. Открытые ответы проверяйте по образцу.",
+        "Открытые ответы проверяйте по образцу.",
         "small muted",
       ),
     ),
@@ -981,6 +947,8 @@ async function settingsPage() {
     settings,
     saveSettings,
     applyFont,
+    applyTheme,
+    run,
     toast,
     node,
     add,
@@ -993,6 +961,8 @@ async function settingsPage() {
 async function route() {
   await saveProgress();
   const ticket = ++renderId;
+  unsubscribePreparation?.();
+  unsubscribePreparation = null;
   resetSelection();
   if (modal.open) closeTranslation();
   clearTimeout(tapTimer);
@@ -1018,6 +988,7 @@ try {
       17,
       Math.min(29, Number(stored.fontSize) || 21),
     );
+    if (["dark", "light"].includes(stored.theme)) settings.theme = stored.theme;
     if (stored.backend)
       try {
         settings.backend = api.setBase(stored.backend);
@@ -1026,6 +997,7 @@ try {
   if (!settings.backend) settings.backend = api.setBase(DEFAULT_BACKEND);
   await api.restoreSession();
   applyFont();
+  applyTheme();
   if (!(await db.get("meta", "initialized"))) {
     await db.tx(["docs", "meta"], "readwrite", (t) => {
       t.objectStore("docs").put(DEMO);

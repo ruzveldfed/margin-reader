@@ -27,6 +27,8 @@ function drain() {
   }
 }
 const MAX_SESSION = 7 * 86400000;
+let authorize;
+export function setAuthorizeHandler(handler) { authorize = handler; }
 export function savedStatus() {
   return snapshot;
 }
@@ -105,9 +107,11 @@ export async function request(path, body, background = false) {
 }
 async function sendRequest(path, body) {
   if (!base)
-    throw new Error("Укажите адрес сервиса в дополнительных настройках");
-  if (path !== "/login" && !session())
-    throw new Error("Войдите в настройках, чтобы получать новые переводы");
+    throw new Error("Не удалось подключиться. Попробуйте обновить страницу.");
+  if (path !== "/login" && !session()) {
+    if (authorize) await authorize();
+    if (!session()) throw new Error("Войдите, чтобы продолжить перевод.");
+  }
   const timeout = path === "/generate" ? 55000 : 10000;
   let res;
   try {
@@ -128,8 +132,8 @@ async function sendRequest(path, body) {
       e.name === "TimeoutError" || e.name === "AbortError"
         ? "Сервис не ответил за " +
             Math.round(timeout / 1000) +
-            " секунд. Адрес сохранён. Можно продолжать читать и повторить позже."
-        : "Не удалось связаться с сервисом переводов. Адрес сохранён. Проверьте доступность сервиса в дополнительных настройках.",
+            " секунд. Уже переведённые слова сохранены. Попробуйте позже."
+        : "Нет соединения. Уже переведённые слова сохранены. Попробуйте позже.",
     );
   }
   let data;
@@ -137,12 +141,17 @@ async function sendRequest(path, body) {
     data = await res.json();
   } catch {
     throw new Error(
-      "Backend вернул неподходящий ответ. Возможна блокировка сервиса",
+      "Не удалось получить перевод. Попробуйте позже.",
     );
   }
   if (!res.ok) {
     if (res.status === 401) await logout();
-    throw new Error(data.error || `Ошибка подключения (${res.status})`);
+    const message = res.status === 401 ? (path === "/login" ? "Неверный пароль." : "Войдите снова, чтобы продолжить перевод.")
+      : res.status === 429 ? (String(data.error).includes("бюджет")
+        ? "Перевод приостановлен до завтра. Уже готовые слова сохранены."
+        : "Сервис занят. Попробуйте немного позже.")
+      : "Не удалось завершить перевод. Уже готовые слова сохранены. Попробуйте ещё раз.";
+    throw new Error(message);
   }
   if (["/status", "/limits", "/login"].includes(path))
     await saveSnapshot(data);

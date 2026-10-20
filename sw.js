@@ -1,4 +1,4 @@
-const CACHE = "margin-shell-v6";
+const CACHE = "margin-shell-v7";
 const FILES = [
   "./",
   "./index.html",
@@ -7,6 +7,8 @@ const FILES = [
   "./api.js",
   "./config.js",
   "./settings.js",
+  "./auth.js",
+  "./preparation.js",
   "./db.js",
   "./schema.js",
   "./demo.js",
