@@ -1,5 +1,6 @@
 import * as api from "./api.js";
 import * as db from "./db.js";
+import { TRANSLATION_MODEL } from "./config.js";
 import { LIMITS, validateBackup } from "./schema.js";
 
 export async function renderSettings(ui) {
@@ -142,78 +143,11 @@ export async function renderSettings(ui) {
   }
   root.append(connection);
 
-  const model = section("Модель перевода"),
-    modelSummary = node("div"),
-    picker = node("div"),
-    modelFeedback = feedback();
-  const paintModel = () => {
-    const current = api.savedStatus()?.model;
-    modelSummary.replaceChildren(
-      current
-        ? para(current.id, "model-name")
-        : para("Ещё не выбрана", "muted"),
-    );
-    modelSummary.append(
-      para(
-        current
-          ? "Модель сохранена. Повторно выбирать её не нужно."
-          : "Выберите модель один раз после входа. Она будет переводить слова и готовить упражнения.",
-        "small muted",
-      ),
-    );
-  };
-  paintModel();
-  const choose = button(
-    api.savedStatus()?.model ? "Изменить модель" : "Выбрать модель",
-    async (b) => {
-      await busy(b, "Загружаем модели…", modelFeedback, async () => {
-        const data = await api.request("/models");
-        const select = node("select");
-        select.setAttribute("aria-label", "Модель перевода");
-        for (const m of data.models) {
-          const o = node("option", m.name + " · " + m.id);
-          o.value = m.id;
-          select.append(o);
-        }
-        if (!data.models.length) {
-          message(
-            modelFeedback,
-            "В каталоге нет доступных текстовых моделей.",
-            true,
-          );
-          return;
-        }
-        const selected = api.savedStatus()?.model?.id;
-        if (selected && data.models.some((m) => m.id === selected))
-          select.value = selected;
-        picker.replaceChildren(
-          add(node("label", "Доступные модели"), select),
-          para(
-            "Рекомендуем DeepSeek V4 Flash: он прошёл проверку перевода и IPA. Новая модель сохранится только после короткого перевода. Проверка расходует один запрос по её тарифу; при ошибке предыдущая модель останется выбранной.",
-            "small muted",
-          ),
-          button(
-            "Проверить и выбрать",
-            async (save) => {
-              await busy(save, "Проверяем перевод…", modelFeedback, async () => {
-                await api.request("/model", { id: select.value });
-                paintModel();
-                picker.replaceChildren();
-                choose.textContent = "Изменить модель";
-                message(
-                  modelFeedback,
-                  "Готово. Модель сохранена для дальнейшего чтения.",
-                );
-              });
-            },
-            "primary",
-          ),
-        );
-      });
-    },
+  const model = section("Модель перевода");
+  add(model,
+    para(TRANSLATION_MODEL.name, "model-name"),
+    para("Одна проверенная модель для слов, подготовки текста и практики. Выбирать и настраивать её не нужно.", "small muted"),
   );
-  choose.disabled = !connected;
-  add(model, modelSummary, choose, picker, modelFeedback);
   root.append(model);
 
   const reading = section("Чтение"),

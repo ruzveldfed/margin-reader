@@ -99,7 +99,7 @@ export function session() {
   return !!token && expires > Date.now();
 }
 export async function request(path, body, background = false) {
-  return ["/generate", "/model"].includes(path)
+  return path === "/generate"
     ? schedule(() => sendRequest(path, body), background)
     : sendRequest(path, body);
 }
@@ -108,14 +108,7 @@ async function sendRequest(path, body) {
     throw new Error("Укажите адрес сервиса в дополнительных настройках");
   if (path !== "/login" && !session())
     throw new Error("Войдите в настройках, чтобы получать новые переводы");
-  const timeout =
-    path === "/generate"
-      ? 55000
-      : path === "/models"
-        ? 35000
-        : path === "/model"
-          ? 55000
-          : 10000;
+  const timeout = path === "/generate" ? 55000 : 10000;
   let res;
   try {
     res = await fetch(base + path, {
@@ -151,7 +144,7 @@ async function sendRequest(path, body) {
     if (res.status === 401) await logout();
     throw new Error(data.error || `Ошибка подключения (${res.status})`);
   }
-  if (["/status", "/model", "/limits", "/login"].includes(path))
+  if (["/status", "/limits", "/login"].includes(path))
     await saveSnapshot(data);
   return data;
 }
