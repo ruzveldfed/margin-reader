@@ -1,5 +1,6 @@
 import * as db from "./db.js";
 import { validateResult, LIMITS } from "./schema.js";
+import { MAX_SESSION, sessionDeadline } from "./session.js";
 let base = "",
   token = "",
   expires = 0,
@@ -26,7 +27,6 @@ function drain() {
     });
   }
 }
-const MAX_SESSION = 7 * 86400000;
 let authorize;
 export function setAuthorizeHandler(handler) { authorize = handler; }
 export function savedStatus() {
@@ -158,19 +158,13 @@ async function sendRequest(path, body) {
   return data;
 }
 export async function login(password, remember = true) {
+  const started = performance.now();
   const d = await request("/login", { password, remember });
-  if (
-    typeof d.token !== "string" ||
-    d.token.length > 1000 ||
-    !Number.isFinite(d.expires) ||
-    d.expires <= Date.now() ||
-    d.expires > Date.now() + MAX_SESSION
-  )
-    throw new Error("Сервис вернул некорректную сессию");
+  const deadline = sessionDeadline(d, performance.now() - started);
   token = d.token;
-  expires = d.expires;
+  expires = deadline;
   if (remember)
-    await db.put("meta", { id: "authSession", base, token, expires });
+    await db.put("meta", { id: "authSession", base, token, expires, serverExpires: d.expires });
   else await db.remove("meta", "authSession");
   return d;
 }
